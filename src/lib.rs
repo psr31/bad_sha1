@@ -1,4 +1,3 @@
-
 /// Hashes the given input using the SHA-1 (Secure Hash Algorithm 1)
 /// cryptographic hash function, returning the 5 word digest.
 ///
@@ -21,7 +20,7 @@
 /// );
 /// ```
 ///
-/// 
+///
 pub fn hash(input: &[u8]) -> [u32; 5] {
     let original_length = input.len() * 8;
     let mut temp;
