@@ -8,20 +8,16 @@
 /// # Examples
 ///
 /// ```
+/// use bad_sha1::hash;
+/// use hex_literal::hex;
+///
 /// assert_eq!(
 ///     hash(b"The quick brown fox jumps over the lazy dog"),
-///     [
-///         0x2fd4e1c6,
-///         0x7a2d28fc,
-///         0xed849ee1,
-///         0xbb76e739,
-///         0x1b93eb12,
-///     ]
+///     hex!("2fd4e1c67a2d28fced849ee1bb76e7391b93eb12"),
 /// );
 /// ```
 ///
-///
-pub fn hash(input: &[u8]) -> [u32; 5] {
+pub fn hash(input: &[u8]) -> [u8; 20] {
     let original_length = input.len() * 8;
     let mut temp;
     let mut a;
@@ -30,7 +26,7 @@ pub fn hash(input: &[u8]) -> [u32; 5] {
     let mut d;
     let mut e;
     let mut hash: [u32; 5] = [0x67452301, 0xEFCDAB89, 0x98BADCFE, 0x10325476, 0xC3D2E1F0];
-    let mut seq = [0u32; 80];
+    let mut w = [0u32; 80];
 
     // Pad message
     let mut input = input.to_vec();
@@ -46,14 +42,14 @@ pub fn hash(input: &[u8]) -> [u32; 5] {
     // Process message
     for block in input.chunks_exact(64) {
         for t in 0..16 {
-            seq[t] = (block[t * 4] as u32) << 24;
-            seq[t] |= (block[t * 4 + 1] as u32) << 16;
-            seq[t] |= (block[t * 4 + 2] as u32) << 8;
-            seq[t] |= block[t * 4 + 3] as u32;
+            w[t] = (block[t * 4] as u32) << 24;
+            w[t] |= (block[t * 4 + 1] as u32) << 16;
+            w[t] |= (block[t * 4 + 2] as u32) << 8;
+            w[t] |= block[t * 4 + 3] as u32;
         }
 
         for t in 16..80 {
-            seq[t] = (seq[t - 3] ^ seq[t - 8] ^ seq[t - 14] ^ seq[t - 16]).rotate_left(1);
+            w[t] = (w[t - 3] ^ w[t - 8] ^ w[t - 14] ^ w[t - 16]).rotate_left(1);
         }
 
         a = hash[0];
@@ -62,58 +58,21 @@ pub fn hash(input: &[u8]) -> [u32; 5] {
         d = hash[3];
         e = hash[4];
 
-        for t in 0..20 {
+        for t in 0..80 {
+            let (logic, constant) = match t {
+                t if t < 20 => ((b & c) | (!b & d), 0x5A827999),
+                t if t < 40 => (b ^ c ^ d, 0x6ED9EBA1),
+                t if t < 60 => ((b & c) | (b & d) | (c & d), 0x8F1BBCDC),
+                t if t < 80 => (b ^ c ^ d, 0xCA62C1D6),
+                _ => unreachable!(),
+            };
+
             temp = a
                 .rotate_left(5)
-                .wrapping_add((b & c) | (!b & d))
+                .wrapping_add(logic)
                 .wrapping_add(e)
-                .wrapping_add(seq[t as usize])
-                .wrapping_add(0x5A827999);
-
-            e = d;
-            d = c;
-            c = b.rotate_left(30);
-            b = a;
-            a = temp;
-        }
-
-        for t in 20..40 {
-            temp = a
-                .rotate_left(5)
-                .wrapping_add(b ^ c ^ d)
-                .wrapping_add(e)
-                .wrapping_add(seq[t as usize])
-                .wrapping_add(0x6ED9EBA1);
-
-            e = d;
-            d = c;
-            c = b.rotate_left(30);
-            b = a;
-            a = temp;
-        }
-
-        for t in 40..60 {
-            temp = a
-                .rotate_left(5)
-                .wrapping_add((b & c) | (b & d) | (c & d))
-                .wrapping_add(e)
-                .wrapping_add(seq[t as usize])
-                .wrapping_add(0x8F1BBCDC);
-
-            e = d;
-            d = c;
-            c = b.rotate_left(30);
-            b = a;
-            a = temp;
-        }
-
-        for t in 60..80 {
-            temp = a
-                .rotate_left(5)
-                .wrapping_add(b ^ c ^ d)
-                .wrapping_add(e)
-                .wrapping_add(seq[t as usize])
-                .wrapping_add(0xCA62C1D6);
+                .wrapping_add(w[t as usize])
+                .wrapping_add(constant);
 
             e = d;
             d = c;
@@ -129,26 +88,26 @@ pub fn hash(input: &[u8]) -> [u32; 5] {
         hash[4] = hash[4].wrapping_add(e);
     }
 
-    hash
+    let mut output = [0u8; 20];
+    for word in 0..5 {
+        output[word * 4] = (hash[word] >> 24) as u8;
+        output[word * 4 + 1] = (hash[word] >> 16) as u8;
+        output[word * 4 + 2] = (hash[word] >> 8) as u8;
+        output[word * 4 + 3] = hash[word] as u8;
+    }
+    output
 }
 
 #[cfg(test)]
 mod tests {
     use crate::hash;
-
-    const TEST_TEXT: &[u8] = include_bytes!("../test.txt");
+    use hex_literal::hex;
 
     #[test]
     fn test_hash1() {
         assert_eq!(
             hash(b"The quick brown fox jumps over the lazy dog"),
-            [
-                0x2fd4e1c6u32,
-                0x7a2d28fc,
-                0xed849ee1,
-                0xbb76e739,
-                0x1b93eb12
-            ]
+            hex!("2fd4e1c67a2d28fced849ee1bb76e7391b93eb12"),
         );
     }
 
@@ -156,31 +115,20 @@ mod tests {
     fn test_hash2() {
         assert_eq!(
             hash(b"The quick brown fox jumps over the lazy cog"),
-            [0xde9f2c7f, 0xd25e1b3a, 0xfad3e85a, 0x0bd17d9b, 0x100db4b3]
+            hex!("de9f2c7fd25e1b3afad3e85a0bd17d9b100db4b3"),
         );
     }
 
     #[test]
     fn test_empty_string() {
-        assert_eq!(
-            hash(b""),
-            [0xda39a3ee, 0x5e6b4b0d, 0x3255bfef, 0x95601890, 0xafd80709]
-        );
+        assert_eq!(hash(b""), hex!("da39a3ee5e6b4b0d3255bfef95601890afd80709"),);
     }
 
     #[test]
     fn test_padding() {
         assert_eq!(
             hash(b"abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz========"),
-            [0x7822ad26, 0xc3079954, 0x7bcb3d14, 0x9ec98ea5, 0x37eb5761]
-        );
-    }
-
-    #[test]
-    fn test_file() {
-        assert_eq!(
-            hash(TEST_TEXT),
-            [0x4e7d3ecd, 0xda407f4d, 0xd0e4173e, 0xee5a27cf, 0x05e00ca6]
+            hex!("7822ad26c30799547bcb3d149ec98ea537eb5761"),
         );
     }
 }
