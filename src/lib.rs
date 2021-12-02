@@ -1,3 +1,5 @@
+const HASH_CONSTANTS: [u32; 5] = [0x67452301, 0xEFCDAB89, 0x98BADCFE, 0x10325476, 0xC3D2E1F0];
+
 /// Hashes the given input using the SHA-1 (Secure Hash Algorithm 1)
 /// cryptographic hash function, returning the 5 word digest.
 ///
@@ -18,75 +20,29 @@
 /// ```
 ///
 pub fn hash(input: &[u8]) -> [u8; 20] {
-    let original_length = input.len() * 8;
-    let mut temp;
-    let mut a;
-    let mut b;
-    let mut c;
-    let mut d;
-    let mut e;
-    let mut hash: [u32; 5] = [0x67452301, 0xEFCDAB89, 0x98BADCFE, 0x10325476, 0xC3D2E1F0];
-    let mut w = [0u32; 80];
+    let mut hash: [u32; 5] = HASH_CONSTANTS;
 
-    // Pad message
-    let mut input = input.to_vec();
-    input.push(0x80);
-    let diff = input.len() % 64;
-    if diff < 56 {
-        input.extend(std::iter::repeat(0).take(56 - diff));
-    } else {
-        input.extend(std::iter::repeat(0).take(120 - diff));
+    let mut blocks = input.chunks_exact(64);
+
+    for block in blocks.by_ref() {
+        update_hash(&mut hash, block);
     }
-    input.extend_from_slice(&(original_length as u64).to_be_bytes());
 
-    // Process message
-    for block in input.chunks_exact(64) {
-        for t in 0..16 {
-            w[t] = (block[t * 4] as u32) << 24;
-            w[t] |= (block[t * 4 + 1] as u32) << 16;
-            w[t] |= (block[t * 4 + 2] as u32) << 8;
-            w[t] |= block[t * 4 + 3] as u32;
-        }
+    let remainder = blocks.remainder();
+    let rem_len = remainder.len();
 
-        for t in 16..80 {
-            w[t] = (w[t - 3] ^ w[t - 8] ^ w[t - 14] ^ w[t - 16]).rotate_left(1);
-        }
+    let mut last_block = [0u8; 64];
+    last_block[..rem_len].copy_from_slice(remainder);
+    last_block[rem_len] = 0x80;
 
-        a = hash[0];
-        b = hash[1];
-        c = hash[2];
-        d = hash[3];
-        e = hash[4];
-
-        for t in 0..80 {
-            let (logic, constant) = match t {
-                t if t < 20 => ((b & c) | (!b & d), 0x5A827999),
-                t if t < 40 => (b ^ c ^ d, 0x6ED9EBA1),
-                t if t < 60 => ((b & c) | (b & d) | (c & d), 0x8F1BBCDC),
-                t if t < 80 => (b ^ c ^ d, 0xCA62C1D6),
-                _ => unreachable!(),
-            };
-
-            temp = a
-                .rotate_left(5)
-                .wrapping_add(logic)
-                .wrapping_add(e)
-                .wrapping_add(w[t as usize])
-                .wrapping_add(constant);
-
-            e = d;
-            d = c;
-            c = b.rotate_left(30);
-            b = a;
-            a = temp;
-        }
-
-        hash[0] = hash[0].wrapping_add(a);
-        hash[1] = hash[1].wrapping_add(b);
-        hash[2] = hash[2].wrapping_add(c);
-        hash[3] = hash[3].wrapping_add(d);
-        hash[4] = hash[4].wrapping_add(e);
+    if rem_len > 54 {
+        update_hash(&mut hash, &last_block);
+        last_block = [0u8; 64];
     }
+
+    let bit_length = input.len() as u64 * 8;
+    last_block[56..].copy_from_slice(&bit_length.to_be_bytes());
+    update_hash(&mut hash, &last_block);
 
     let mut output = [0u8; 20];
     for word in 0..5 {
@@ -96,6 +52,93 @@ pub fn hash(input: &[u8]) -> [u8; 20] {
         output[word * 4 + 3] = hash[word] as u8;
     }
     output
+}
+
+fn update_hash(hash: &mut [u32; 5], block: &[u8]) {
+    let mut w = [0u32; 80];
+
+    for t in 0..16 {
+        w[t] = (block[t * 4] as u32) << 24;
+        w[t] |= (block[t * 4 + 1] as u32) << 16;
+        w[t] |= (block[t * 4 + 2] as u32) << 8;
+        w[t] |= block[t * 4 + 3] as u32;
+    }
+
+    for t in 16..80 {
+        w[t] = (w[t - 3] ^ w[t - 8] ^ w[t - 14] ^ w[t - 16]).rotate_left(1);
+    }
+
+    let mut a = hash[0];
+    let mut b = hash[1];
+    let mut c = hash[2];
+    let mut d = hash[3];
+    let mut e = hash[4];
+
+    for &x in &w[0..20] {
+        let temp = a
+            .rotate_left(5)
+            .wrapping_add((b & c) | (!b & d))
+            .wrapping_add(e)
+            .wrapping_add(x)
+            .wrapping_add(0x5A827999);
+
+        e = d;
+        d = c;
+        c = b.rotate_left(30);
+        b = a;
+        a = temp;
+    }
+
+    for &x in &w[20..40] {
+        let temp = a
+            .rotate_left(5)
+            .wrapping_add(b ^ c ^ d)
+            .wrapping_add(e)
+            .wrapping_add(x)
+            .wrapping_add(0x6ED9EBA1);
+
+        e = d;
+        d = c;
+        c = b.rotate_left(30);
+        b = a;
+        a = temp;
+    }
+
+    for &x in &w[40..60] {
+        let temp = a
+            .rotate_left(5)
+            .wrapping_add((b & c) | (b & d) | (c & d))
+            .wrapping_add(e)
+            .wrapping_add(x)
+            .wrapping_add(0x8F1BBCDC);
+
+        e = d;
+        d = c;
+        c = b.rotate_left(30);
+        b = a;
+        a = temp;
+    }
+
+    for &x in &w[60..80] {
+        let temp = a
+            .rotate_left(5)
+            .wrapping_add(b ^ c ^ d)
+            .wrapping_add(e)
+            .wrapping_add(x)
+            .wrapping_add(0xCA62C1D6);
+
+        e = d;
+        d = c;
+        c = b.rotate_left(30);
+        b = a;
+        a = temp;
+    }
+
+    hash[0] = hash[0].wrapping_add(a);
+    hash[1] = hash[1].wrapping_add(b);
+    hash[2] = hash[2].wrapping_add(c);
+    hash[3] = hash[3].wrapping_add(d);
+    hash[4] = hash[4].wrapping_add(e);
 }
 
 #[cfg(test)]
